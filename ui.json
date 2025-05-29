@@ -1,7 +1,6 @@
 {
-  "animationFramesPath": "https://katr5na.github.io/WebGL-Surface-Tracking-AR/ui/help_to_install_sequence/",
-  "framePattern": "https://katr5na.github.io/WebGL-Surface-Tracking-AR/ui/hand/frame_{{index}}_delay-0.08s.png",
-  "frameCount": 75,
-  "arrowImage": "https://katr5na.github.io/WebGL-Surface-Tracking-AR/ui/hand/arrow.png",
-  "arrowStartOffset": 120
+  "animationFramesPath": "https://cdn.example.com/help_to_install_sequence/",
+  "framePattern": "frame_%02d.png",
+  "totalFrames": 75,
+  "arrowIcon": "arrow.png"
 }
