@@ -1,0 +1,7 @@
+{
+  "animationFramesPath": "ui/help_to_install_sequence/",
+  "framePattern": "frame_{{index}}_delay-0.08s.png",
+  "frameCount": 75,
+  "arrowImage": "ui/hand/arrow.png",
+  "arrowStartOffset": 120
+}
