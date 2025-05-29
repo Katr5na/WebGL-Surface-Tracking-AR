@@ -2,19 +2,19 @@
     "models": [
       {
         "label": "Austin",
-        "url": "https://yahodev.github.io/WebGL-Surface-Tracking-AR/model/lion_austin18.glb"
+        "url": "https://katr5na.github.io/WebGL-Surface-Tracking-AR/model/lion_austin18.glb"
       },
       {
         "label": "Oscar",
-        "url": "https://yahodev.github.io/WebGL-Surface-Tracking-AR/model/lion_oscar03.glb"
+        "url": "https://katr5na.github.io/WebGL-Surface-Tracking-AR/model/lion_oscar03.glb"
       },
       {
         "label": "ZentiOne",
-        "url": "https://yahodev.github.io/WebGL-Surface-Tracking-AR/model/lion_zenit27.glb"
+        "url": "https://katr5na.github.io/WebGL-Surface-Tracking-AR/model/lion_zenit27.glb"
       },
       {
         "label": "ZentiTwo",
-        "url": "https://yahodev.github.io/WebGL-Surface-Tracking-AR/model/lion_zenit625.glb"
+        "url": "https://katr5na.github.io/WebGL-Surface-Tracking-AR/model/lion_zenit625.glb"
       }
     ]
   }
