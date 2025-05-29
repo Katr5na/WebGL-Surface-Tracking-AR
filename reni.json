@@ -2,11 +2,11 @@
     "models": [
       {
         "label": "Reni-1",
-        "url": "https://yahodev.github.io/WebGL-Surface-Tracking-AR/model/reni_zenit625.glb"
+        "url": "https://katr5na.github.io/WebGL-Surface-Tracking-AR/model/reni_zenit625.glb"
       },
       {
         "label": "Reni-2",
-        "url": "https://yahodev.github.io/WebGL-Surface-Tracking-AR/model/reni_zenit31.glb"
+        "url": "https://katr5na.github.io/WebGL-Surface-Tracking-AR/model/reni_zenit31.glb"
       }
     ]
   }
