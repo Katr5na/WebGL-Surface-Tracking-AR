@@ -1,6 +1,5 @@
 {
-  "animationFramesPath": "https://cdn.example.com/help_to_install_sequence/",
-  "framePattern": "frame_%02d.png",
-  "totalFrames": 75,
-  "arrowIcon": "arrow.png"
+  "sheetKey": "1uMR9fauSSLKP5p1ZOa8_KxJ34BIZUVBu_KMtvU3Ihhg",
+  "codeGsUrl": "https://script.google.com/macros/s/.../exec",
+  "sheetName": "Sheet1"
 }
