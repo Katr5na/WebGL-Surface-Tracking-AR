@@ -1,311 +1,257 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="uk">
 <head>
-  <meta charset="utf-8">
+  <meta charset="UTF-8">
   <title>AR Demo</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <!-- ========== СТИЛІ ========== -->
   <style>
-    body { margin: 0; overflow: hidden; }
-
-    #overlay {
-      position: absolute; top: 0; left: 0;
-      width: 100%; height: 100%;
-      pointer-events: none; z-index: 10;
+    body, html { margin:0; padding:0; overflow:hidden; }
+    #screen-overlay {
+      position:absolute; top:0; left:0;
+      width:100%; height:100%;
+      display:flex; flex-direction:column;
+      justify-content:center; align-items:center;
+      background:rgba(0,0,0,0.5); z-index:10;
     }
-    #overlay > * { pointer-events: auto; }
-
-    #search-anim, #arrow-img {
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 15;
+    #start-ar, .order-button, #model-switch-buttons button {
+      margin:8px; padding:12px 24px; font-size:1em;
     }
-
-    #search-anim {
-      top: 50%;
-      transform: translate(-50%, -50%);
-      width: 100px; height: 100px;
+    #search-frame {
+      position:absolute; top:50%; left:50%;
+      transform:translate(-50%,-50%);
+      width:150px; height:150px;
+      z-index:5; display:none;
     }
-
-    #arrow-img {
-      display: none;
+    .error-text {
+      position:absolute; top:50%; left:50%;
+      transform:translate(-50%,-50%);
+      color:red; font-size:1.2em;
+      background:rgba(255,255,255,0.8);
+      padding:12px; border-radius:4px;
+      z-index:20;
     }
-
-    #close-ar {
-      position: absolute; top: 10px; right: 10px;
-      z-index: 12;
-      padding: 6px 12px; font-size: 18px;
-      border: none; border-radius: 4px;
-      background: rgba(255,255,255,0.9);
-      cursor: pointer;
-    }
+    canvas { position:absolute; top:0; left:0; }
   </style>
 
-  <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+  <!-- ========== IMPORTMAP ДЛЯ three.js ========== -->
   <script type="importmap">
-    {
-      "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/examples/jsm/webxr/ARButton.js": "https://unpkg.com/three@0.160.0/examples/jsm/webxr/ARButton.js",
-        "three/examples/jsm/loaders/GLTFLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
-      }
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "GLTFLoader": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js",
+      "ARButton": "https://unpkg.com/three@0.160.0/examples/jsm/webxr/ARButton.js"
     }
+  }
   </script>
+  <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
 </head>
+
 <body>
-  <div id="overlay">
-    <div id="search-anim">
-      <img id="search-frame" src="" width="100" height="100" />
-    </div>
-    <img id="arrow-img" src="" />
-    <button id="close-ar">&#10005;</button>
+  <!-- ======= СТАРТОВИЙ ОВЕРЛЕЙ ======= -->
+  <div id="screen-overlay">
+    <button id="start-ar"></button>
+    <div id="order-button-container"></div>
+    <div id="model-switch-buttons"></div>
   </div>
 
+  <!-- ======= Анімація “пошук поверхні” ======= -->
+  <img id="search-frame">
+
+  <!-- ======= AR canvas ======= -->
+  <canvas id="ar-canvas"></canvas>
+
   <script type="module">
-    import * as THREE from 'three';
-    import { ARButton } from 'three/examples/jsm/webxr/ARButton.js';
-    import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+  import * as THREE from 'three';
+  import { GLTFLoader } from 'GLTFLoader';
+  import { ARButton } from 'ARButton';
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const configUrl = urlParams.get('config');
-    const scaleEnabled = urlParams.get('scale') === 'true';
+  // 1) РОЗБІР URL-ПАРАМЕТРІВ
+  const params          = new URLSearchParams(window.location.search);
+  const lang            = params.get('lang')          || 'ua';
+  const byUrl           = params.get('byUrl')         || null;
+  const commodityName   = params.get('commodityName') || null;
+  const scaleEnabled    = params.has('scale');
+  const buttonsArCount  = parseInt(params.get('buttonsAr')) || 0;
+  const modelLabel      = commodityName || null;
 
-    const searchAnim = document.getElementById('search-anim');
-    const searchFrame = document.getElementById('search-frame');
-    const arrowImg = document.getElementById('arrow-img');
+  // 2) UI-конфіг для фону та послідовності кадрів
+  const uiConfig = {
+    backgroundUrl: params.get('background') ||
+      'https://raw.githubusercontent.com/Katr5na/WebGL-Surface-Tracking-AR/master/ui/background/peachy.jpg',
+    helpSequenceUrl:
+      'https://raw.githubusercontent.com/Katr5na/WebGL-Surface-Tracking-AR/master/ui/help_to_install_sequence'
+  };
 
-    let uiData = {};
-    let searchFrames = [];
-    let currentFrame = 0;
-    let frameTimer = null;
+  let translations = {};
+  let currentModelIndex = 0;
 
-    let arrowOffset = 0;
-    let arrowDirection = 1;
-    let arrowInterval = null;
+  // 3) ЗАВАНТАЖЕННЯ ЛОКАЛІЗАЦІЇ
+  async function loadLocalization() {
+    try {
+      const gs = await fetch('GoogleSheetsLocalization.json').then(r=>r.json());
+      const url = new URL(gs.codeGsUrl);
+      url.searchParams.set('sheetKey', gs.sheetKey);
+      url.searchParams.set('sheetName', gs.sheetName);
+      url.searchParams.set('lang', lang);
+      translations = await fetch(url).then(r=>r.json());
+    } catch(e) {
+      console.warn('Не вдалося завантажити локалізацію, будуть дефолти', e);
+      translations = {};
+    }
+  }
 
-    function startArrowBounce(offset) {
-      arrowOffset = 0;
-      arrowInterval = setInterval(() => {
-        arrowOffset += arrowDirection * 1;
-        if (arrowOffset > 20 || arrowOffset < 0) arrowDirection *= -1;
-        arrowImg.style.top = `calc(50% - ${offset + arrowOffset}px)`;
-      }, 30);
+  // 4) ІНІЦІАЛІЗАЦІЯ UI
+  async function initUI() {
+    await loadLocalization();
+
+    // фон
+    document.body.style.backgroundImage = `url(${uiConfig.backgroundUrl})`;
+    document.body.style.backgroundSize  = 'cover';
+
+    // кнопка “Запустити AR”
+    const startBtn = document.getElementById('start-ar');
+    startBtn.textContent = translations.startAr || 'Запустити AR';
+    startBtn.addEventListener('click', ()=> {
+      document.getElementById('screen-overlay').style.display = 'none';
+      startARSession();
+      startSearchAnimation();
+    });
+
+    // кнопка “Замовити”
+    if (byUrl) {
+      const c = document.getElementById('order-button-container');
+      const btn = document.createElement('a');
+      btn.href = byUrl;
+      btn.textContent = translations.byButton || 'Замовити';
+      btn.classList.add('order-button');
+      c.append(btn);
     }
 
-    function stopArrowBounce() {
-      clearInterval(arrowInterval);
-      arrowInterval = null;
+    // кнопки перемикання моделей
+    const sw = document.getElementById('model-switch-buttons');
+    for (let i=0; i<buttonsArCount; i++) {
+      const btn = document.createElement('button');
+      btn.textContent = 
+        translations.buttonTexts?.[i] || `Модель ${i+1}`;
+      btn.addEventListener('click', ()=> currentModelIndex = i);
+      sw.append(btn);
     }
+  }
 
-    fetch("ui.json")
-      .then(res => res.json())
-      .then(json => {
-        uiData = json;
+  // 5) Анімація “пошук” (75 кадрів за ~2 сек)
+  let searchAnimationInterval;
+  function startSearchAnimation() {
+    const img = document.getElementById('search-frame');
+    img.style.display = 'block';
+    let frame = 0, total = 75, interval = 2000/75;
+    searchAnimationInterval = setInterval(()=>{
+      const n = String(frame).padStart(2,'0');
+      img.src = `${uiConfig.helpSequenceUrl}/frame_${n}_delay-0.08s.png`;
+      frame = (frame+1)%total;
+    }, interval);
+  }
+  function stopSearchAnimation() {
+    clearInterval(searchAnimationInterval);
+    document.getElementById('search-frame').style.display = 'none';
+  }
 
-        // Заповнення кадрів
-        searchFrames = Array.from({ length: json.frameCount }, (_, i) =>
-          json.animationFramesPath + json.framePattern.replace("{{index}}", i.toString().padStart(2, "0"))
-        );
+  // 6) AR-ЛОГІКА
+  let scene, camera, renderer, reticle, modelObjects = [];
 
-        // Задаємо стрілку
-        arrowImg.src = json.arrowImage;
-        arrowImg.style.top = `calc(50% - ${json.arrowStartOffset}px)`;
+  async function startARSession() {
+    // 🔹 Завантажуємо моделі з JSON-конфігу (lion.json чи reni.json)
+    const configUrl = params.get('config');
+    const list = await fetch(configUrl).then(r=>r.json());
+    const loader = new GLTFLoader();
+    modelObjects = await Promise.all(
+      list.map(e =>
+        loader.loadAsync(e.url)
+          .then(g=>g.scene)
+          .catch(_=>null)
+      )
+    );
 
-        // Стартуємо анімацію
-        frameTimer = setInterval(() => {
-          searchFrame.src = searchFrames[currentFrame];
-          currentFrame = (currentFrame + 1) % searchFrames.length;
-        }, 80);
+    // 🔹 Створюємо сцену, камеру, світло
+    scene    = new THREE.Scene();
+    camera   = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 20);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
 
-        startApp();
-      });
+    // 🔹 Рендерер із XR
+    renderer = new THREE.WebGLRenderer({
+      antialias: true, alpha: true, canvas: document.getElementById('ar-canvas')
+    });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    document.body.append(
+      ARButton.createButton(renderer, {
+        requiredFeatures: ['hit-test','dom-overlay'],
+        domOverlay: { root: document.body }
+      })
+    );
 
-    function startApp() {
-      if (!configUrl) {
-        alert("Missing ?config= parameter");
-        throw new Error("Missing config");
-      }
+    // 🔹 Ретікл + жовтий колір
+    reticle = new THREE.Mesh(
+      new THREE.RingGeometry(0.15,0.2,32).rotateX(-Math.PI/2),
+      new THREE.MeshBasicMaterial({ color: 0xFFD700 })
+    );
+    reticle.matrixAutoUpdate = false;
+    reticle.visible = false;
+    scene.add(reticle);
 
-      const loader = new GLTFLoader();
-      const modelObjects = [];
-      let modelList = [];
-      let placedModel = null;
+    // 🔹 Хіт-тести та “select”
+    let hitSource, localRef;
+    renderer.xr.addEventListener('sessionstart', async ()=>{
+      const session = renderer.xr.getSession();
+      const viewer  = await session.requestReferenceSpace('viewer');
+      hitSource     = await session.requestHitTestSource({ space: viewer });
+      localRef      = await session.requestReferenceSpace('local');
+      session.addEventListener('select', onSelect);
+    });
 
-      let camera, scene, renderer, reticle, controller;
-      let hitTestSource = null, hitTestSourceRequested = false;
-      let isUserInteracting = false, isRotatingGesture = false;
-      let lastTouchX = 0, lastTouchY = 0, previousRotationAngle = 0;
-      let initialDistance = 0, initialScale = 1;
-
-      function getTouchAngle(touches) {
-        const dx = touches[1].clientX - touches[0].clientX;
-        const dy = touches[1].clientY - touches[0].clientY;
-        return Math.atan2(dy, dx);
-      }
-
-      fetch(configUrl)
-        .then(res => res.json())
-        .then(cfg => {
-          modelList = cfg.models;
-          return Promise.all(modelList.map(entry => new Promise(resolve => {
-            loader.load(entry.url, gltf => {
-              modelObjects.push(gltf.scene);
-              resolve();
-            }, undefined, err => {
-              console.error("Model load error:", err);
-              modelObjects.push(null);
-              resolve();
-            }));
-          })));
-        })
-        .then(() => {
-          init();
-          animate();
-        });
-
-      function init() {
-        scene = new THREE.Scene();
-        camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-        scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
-
-        renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-        renderer.setPixelRatio(window.devicePixelRatio);
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.xr.enabled = true;
-        document.body.appendChild(renderer.domElement);
-
-        const ringGeo = new THREE.RingGeometry(0.05, 0.06, 32).rotateX(-Math.PI / 2);
-        reticle = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd700 }));
-        reticle.matrixAutoUpdate = false;
-        reticle.visible = false;
-        scene.add(reticle);
-
-        controller = renderer.xr.getController(0);
-        controller.addEventListener('select', onSelect);
-        scene.add(controller);
-
-        window.addEventListener('resize', onWindowResize);
-
-        document.getElementById("close-ar").onclick = () => {
-          const session = renderer.xr.getSession();
-          if (session) session.end();
-        };
-
-        document.addEventListener('touchstart', event => {
-          if (!placedModel) return;
-          if (event.touches.length === 1) {
-            isUserInteracting = true;
-            lastTouchX = event.touches[0].clientX;
-            lastTouchY = event.touches[0].clientY;
-          } else if (event.touches.length === 2) {
-            isRotatingGesture = true;
-            previousRotationAngle = getTouchAngle(event.touches);
-            if (scaleEnabled) {
-              const dx = event.touches[0].clientX - event.touches[1].clientX;
-              const dy = event.touches[0].clientY - event.touches[1].clientY;
-              initialDistance = Math.sqrt(dx * dx + dy * dy);
-              initialScale = placedModel.scale.x;
-            }
-          }
-        });
-
-        document.addEventListener('touchmove', event => {
-          if (!placedModel) return;
-          if (isRotatingGesture && event.touches.length === 2) {
-            const angle = getTouchAngle(event.touches);
-            placedModel.rotation.y -= (angle - previousRotationAngle);
-            previousRotationAngle = angle;
-
-            if (scaleEnabled) {
-              const dx = event.touches[0].clientX - event.touches[1].clientX;
-              const dy = event.touches[0].clientY - event.touches[1].clientY;
-              const distance = Math.sqrt(dx * dx + dy * dy);
-              placedModel.scale.setScalar(initialScale * (distance / initialDistance));
-            }
-          } else if (isUserInteracting) {
-            const touch = event.touches[0];
-            placedModel.position.x += (touch.clientX - lastTouchX) * 0.005;
-            placedModel.position.z += (touch.clientY - lastTouchY) * 0.005;
-            lastTouchX = touch.clientX;
-            lastTouchY = touch.clientY;
-          }
-        });
-
-        document.addEventListener('touchend', e => {
-          if (e.touches.length < 2) isRotatingGesture = false;
-          if (e.touches.length === 0) isUserInteracting = false;
-        });
-
-        const overlayRoot = document.getElementById('overlay');
-        const sessionInit = {
-          requiredFeatures: ['hit-test', 'dom-overlay'],
-          domOverlay: { root: overlayRoot }
-        };
-
-        document.body.appendChild(ARButton.createButton(renderer, sessionInit));
-      }
-
-      function onWindowResize() {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-      }
-
-      function onSelect() {
-        if (!reticle.visible || placedModel) return;
-        const model = modelObjects[0];
-        placedModel = model.clone();
-        placedModel.position.setFromMatrixPosition(reticle.matrix);
-        placedModel.quaternion.setFromRotationMatrix(reticle.matrix);
-        scene.add(placedModel);
-        reticle.visible = false;
-        searchAnim.style.display = 'none';
-        arrowImg.style.display = 'none';
-        stopArrowBounce();
-      }
-
-      function animate() {
-        renderer.setAnimationLoop(render);
-      }
-
-      function render(_, frame) {
-        if (frame && !placedModel) {
-          const session = renderer.xr.getSession();
-          const refSpace = renderer.xr.getReferenceSpace();
-
-          if (!hitTestSourceRequested) {
-            session.requestReferenceSpace('viewer').then(rs =>
-              session.requestHitTestSource({ space: rs })
-                .then(src => { hitTestSource = src; })
-            );
-            session.addEventListener('end', () => {
-              hitTestSourceRequested = false;
-              hitTestSource = null;
-            });
-            hitTestSourceRequested = true;
-          }
-
-          if (hitTestSource) {
-            const hits = frame.getHitTestResults(hitTestSource);
-            if (hits.length > 0) {
-              const pose = hits[0].getPose(refSpace);
-              reticle.visible = true;
-              reticle.matrix.fromArray(pose.transform.matrix);
-              searchAnim.style.display = 'none';
-              arrowImg.style.display = 'block';
-              if (!arrowInterval) startArrowBounce(uiData.arrowStartOffset);
-            } else {
-              reticle.visible = false;
-              searchAnim.style.display = 'block';
-              arrowImg.style.display = 'none';
-              stopArrowBounce();
-            }
-          }
+    // 🔹 Цикл рендера
+    renderer.setAnimationLoop((_, frame)=>{
+      if (frame && hitSource) {
+        const hits = frame.getHitTestResults(hitSource);
+        if (hits.length) {
+          const pose = hits[0].getPose(localRef);
+          reticle.visible = true;
+          reticle.matrix.fromArray(pose.transform.matrix);
+          stopSearchAnimation();
         }
-
-        renderer.render(scene, camera);
       }
+      renderer.render(scene, camera);
+    });
+
+    window.addEventListener('resize', ()=>{
+      camera.aspect = window.innerWidth/window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // 🔹 Жести (переміщення/поворот/масштаб) — вставте тут ваш код, обгорнувши блок масштабу:
+    // if (scaleEnabled && touches.length === 2) { … }
+  }
+
+  // 7) Обробник “select” (розміщення моделі або помилка)
+  function onSelect() {
+    if (!commodityName) {
+      const err = document.createElement('div');
+      err.classList.add('error-text');
+      err.textContent = translations.error || 'Помилка 005';
+      document.body.append(err);
+      return;
     }
+    const mdl = modelObjects[currentModelIndex]?.clone();
+    if (mdl) {
+      mdl.applyMatrix4(reticle.matrix);
+      scene.add(mdl);
+    }
+    reticle.visible = false;
+    stopSearchAnimation();
+  }
+
+  // === Запускаємо UI на початку ===
+  initUI();
   </script>
 </body>
 </html>
