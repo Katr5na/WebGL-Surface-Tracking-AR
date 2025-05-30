@@ -1,71 +1,231 @@
-<!-- index.html -->
 <!DOCTYPE html>
 <html lang="ua">
 <head>
-  <meta charset="utf-8">
-  <title>AR Viewer</title>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <!-- Import-map для Three.js та доповненої реальності -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.150.1/build/three.module.js",
-      "three/examples/jsm/": "https://unpkg.com/three@0.150.1/examples/jsm/"
-    }
-  }
-  </script>
+  <title>AR Demo</title>
+
+  <!-- Three.js та ARButton -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.151.3/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.151.3/examples/jsm/webxr/ARButton.js"></script>
 
   <style>
-    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
-    #app { width: 100%; height: 100%; background-size: cover; position: relative; }
-    canvas { display: block; width: 100%; height: 100%; }
-    #start-screen {
-      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      display: flex; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.6); z-index: 10;
+    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; }
+    #start-ar {
+      position:absolute; top:50%; left:50%;
+      transform:translate(-50%,-50%);
+      padding:1em 2em; font-size:1.2em;
+      background:#fff; border:none; border-radius:5px;
+      cursor:pointer;
     }
-    #start-ar-btn {
-      padding: 1em 2em; font-size: 1.2em; border: none; border-radius: 8px;
-      background: #007ACC; color: white; cursor: pointer;
+    #help-img {
+      position:absolute; top:50%; left:50%;
+      transform:translate(-50%,-50%);
+      display:block; width:200px; height:200px;
     }
-    #overlay {
-      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-      display: flex; align-items: center; gap: 0.5em; z-index: 10;
+    #product-name {
+      position:absolute; top:10px; left:50%;
+      transform:translateX(-50%); font-size:1.5em;
+      color:#333;
     }
-    #close-ar { position: absolute; top: 10px; right: 10px; padding: 0.5em; }
-    #model-buttons { display: flex; gap: 0.5em; overflow-x: auto; }
-    #model-buttons button { padding: 0.5em 1em; }
-    #order-button-container { margin-left: 1em; }
-    #order-button { padding: 0.5em 1em; background: #28A745; color: white; text-decoration: none; border-radius: 4px; }
-    #loading-seq {
-      position: absolute; top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      display: none; width: 200px; height: 200px; z-index: 9;
+    #order-button-container {
+      position:absolute; bottom:20px; left:50%;
+      transform:translateX(-50%);
     }
   </style>
 </head>
-<body id="app">
-  <!-- Стартовий екран -->
-  <div id="start-screen">
-    <button id="start-ar-btn">…</button>
+<body>
+  <div id="product-name"></div>
+  <button id="start-ar">…</button>
+  <div id="order-button-container" style="display:none;">
+    <a id="order-button" href="#" target="_blank"></a>
   </div>
+  <!-- для анімації помічника -->
+  <img id="help-img" style="display:none;" />
 
-  <!-- HTML-оверлей для AR-контролів -->
-  <div id="overlay" hidden>
-    <button id="close-ar">✕</button>
-    <div id="model-buttons"></div>
-    <div id="order-button-container" hidden>
-      <a id="order-button" target="_blank"></a>
-    </div>
-  </div>
+  <script type="module">
+  import { CONFIG } from './config.js';
 
-  <!-- Анімація завантаження ретикулу -->
-  <img id="loading-seq" />
+  let translations = {
+    startAr:   'Запустити AR',
+    byButton:  'Замовити',
+    instruction:'Наведіть камеру на поверхню',
+    error:     'Сталася помилка',
+    // text1…textN — за дефолтом візьмемо з entry.label
+  };
 
-  <!-- WebGL-канвас -->
-  <canvas id="ar-canvas"></canvas>
+  // 1) Локалізація
+  fetch(`${(await import('./GoogleSheetsLocalization.json')).default.codeGsUrl}`
+        +`?sheetKey=${(await import('./GoogleSheetsLocalization.json')).default.sheetKey}`
+        +`&sheetName=${(await import('./GoogleSheetsLocalization.json')).default.sheetName}`)
+    .then(r => r.json())
+    .then(data => { translations = { ...translations, ...data }; })
+    .catch(_ => console.warn('Fallback to default UA labels'));
 
-  <!-- Основний скрипт -->
-  <script type="module" src="main.js"></script>
+  // 2) Фон
+  if (CONFIG.background && CONFIG.backgroundName) {
+    document.body.style.backgroundImage =
+      `url(${CONFIG.background}/${CONFIG.backgroundName})`;
+    document.body.style.backgroundSize = 'cover';
+  }
+
+  // 3) Підготовка UI до старту AR
+  const btnStart = document.getElementById('start-ar');
+  btnStart.textContent = translations.startAr;
+
+  // назва товару
+  document.getElementById('product-name')
+    .textContent = CONFIG.commodityName || 'Помилка 005';
+
+  btnStart.addEventListener('click', async () => {
+    // Додаємо ARButton
+    document.body.appendChild( ARButton.createButton(renderer) );
+    btnStart.style.display = 'none';
+    document.body.style.background = 'none';
+    startARSession();
+  });
+
+  // 4) Основні змінні Three.js
+  let camera, scene, renderer, reticle;
+  let placedModel = null;
+  let helpAnimInterval, helpFrame = 0;
+
+  function init() {
+    // Сцена, камера, light…
+    scene    = new THREE.Scene();
+    camera   = new THREE.PerspectiveCamera();
+    renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    // ретикл
+    reticle = new THREE.Mesh(
+      new THREE.RingGeometry(0.15,0.2,32).rotateX(-Math.PI/2),
+      new THREE.MeshBasicMaterial({ color:0xFFD800 }) // яскраво-жовтий
+    );
+    reticle.visible = false;
+    scene.add(reticle);
+
+    // жест pinch, якщо enabled
+    if (CONFIG.enableScale) setupPinchToScale();
+
+    // обробник тапу
+    const controller = renderer.xr.getController(0);
+    controller.addEventListener('select', onSelect);
+    scene.add(controller);
+  }
+
+  function startARSession() {
+    init();
+    renderer.setAnimationLoop(render);
+    startHelpAnim();
+  }
+
+  function render(timestamp, frame) {
+    // детекція поверхні
+    const refSpace = renderer.xr.getReferenceSpace();
+    const session  = renderer.xr.getSession();
+    if (frame) {
+      const hitTest = frame.getHitTestResults(/* … */);
+      if (hitTest.length > 0) {
+        reticle.visible = true;
+        reticle.matrix.fromArray(hitTest[0].getPose(refSpace).transform.matrix);
+        stopHelpAnim();
+      }
+    }
+    renderer.render(scene, camera);
+  }
+
+  // 5) Анімація допоміжних кадрів
+  function startHelpAnim() {
+    if (!CONFIG.helpToInstall) return;
+    const img = document.getElementById('help-img');
+    img.style.display = 'block';
+    helpAnimInterval = setInterval(() => {
+      img.src = `${CONFIG.helpToInstall}/frame_${String(helpFrame).padStart(2,'0')}_delay-0.08s.png`;
+      helpFrame = (helpFrame + 1) % 75;
+    }, 2000/75);
+  }
+  function stopHelpAnim() {
+    clearInterval(helpAnimInterval);
+    document.getElementById('help-img').style.display = 'none';
+  }
+
+  // 6) Розміщення моделі
+  function onSelect() {
+    if (!reticle.visible) return;
+    // Тут — логіка завантаження та додавання 3D-моделі
+    placedModel = new THREE.Mesh(
+      new THREE.BoxGeometry(0.2,0.2,0.2),
+      new THREE.MeshNormalMaterial()
+    );
+    placedModel.position.setFromMatrixPosition(reticle.matrix);
+    scene.add(placedModel);
+
+    buildModelButtons();
+    showOrderButton();
+  }
+
+  // 7) Масштабування pinch
+  function setupPinchToScale() {
+    let initialDist = 0, initialScale = 1;
+    document.addEventListener('touchstart', e => {
+      if (e.touches.length === 2 && placedModel) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        initialDist  = Math.hypot(dx, dy);
+        initialScale = placedModel.scale.x;
+      }
+    });
+    document.addEventListener('touchmove', e => {
+      if (e.touches.length === 2 && placedModel) {
+        const dx = e.touches[0].clientX - e.touches[1].clientX;
+        const dy = e.touches[0].clientY - e.touches[1].clientY;
+        const newDist = Math.hypot(dx, dy);
+        const factor  = newDist / initialDist;
+        placedModel.scale.setScalar(initialScale * factor);
+      }
+    });
+  }
+
+  // 8) Кнопки перемикання моделей
+  const modelList = [
+    { url:'model1.glb', label:'Модель 1' },
+    { url:'model2.glb', label:'Модель 2' },
+    // …
+  ];
+  function buildModelButtons() {
+    const count = CONFIG.buttonsAr || modelList.length;
+    const container = document.createElement('div');
+    container.id = 'ar-buttons';
+    container.style.position = 'absolute';
+    container.style.bottom = '80px';
+    container.style.left = '50%';
+    container.style.transform = 'translateX(-50%)';
+    modelList.slice(0,count).forEach((entry, idx) => {
+      const btn = document.createElement('button');
+      btn.textContent = translations[`text${idx+1}`] || entry.label;
+      btn.onclick = () => {
+        // змінити модель на entry.url
+      };
+      container.appendChild(btn);
+    });
+    document.body.appendChild(container);
+  }
+
+  // 9) Кнопка “Замовити”
+  function showOrderButton() {
+    if (!CONFIG.byUrl) return;
+    const wrap = document.getElementById('order-button-container');
+    const btn  = document.getElementById('order-button');
+    btn.href    = CONFIG.byUrl;
+    btn.textContent = translations.byButton || 'To order';
+    wrap.style.display = 'block';
+  }
+
+  </script>
 </body>
 </html>
