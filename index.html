@@ -1,257 +1,279 @@
 <!DOCTYPE html>
-<html lang="uk">
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>AR Demo</title>
-  <!-- ========== СТИЛІ ========== -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>AR with DOM Overlay, Carousel Model Buttons</title>
   <style>
-    body, html { margin:0; padding:0; overflow:hidden; }
-    #screen-overlay {
-      position:absolute; top:0; left:0;
-      width:100%; height:100%;
-      display:flex; flex-direction:column;
-      justify-content:center; align-items:center;
-      background:rgba(0,0,0,0.5); z-index:10;
+    body { margin: 0; overflow: hidden; }
+    #overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 10;
     }
-    #start-ar, .order-button, #model-switch-buttons button {
-      margin:8px; padding:12px 24px; font-size:1em;
+    #overlay > * { pointer-events: auto; }
+
+    /* Close button */
+    #close-ar {
+      position: absolute;
+      top: 10px; right: 10px;
+      padding: 6px 12px;
+      font-size: 18px;
+      border: none; border-radius: 4px;
+      background: rgba(255,255,255,0.9);
+      cursor: pointer; z-index: 12;
     }
-    #search-frame {
-      position:absolute; top:50%; left:50%;
-      transform:translate(-50%,-50%);
-      width:150px; height:150px;
-      z-index:5; display:none;
+
+    /* Carousel container for model buttons */
+    #model-buttons {
+      position: absolute;
+      bottom: 20px;
+      left: 50%; transform: translateX(-50%);
+      width: 80%;
+      display: none;
+      overflow-x: auto;
+      display: flex;
+      gap: 10px;
+      padding: 8px 5px;
+      background: rgba(0,0,0,0.4);
+      border-radius: 8px;
+      z-index: 11;
+      -webkit-overflow-scrolling: touch;
     }
-    .error-text {
-      position:absolute; top:50%; left:50%;
-      transform:translate(-50%,-50%);
-      color:red; font-size:1.2em;
-      background:rgba(255,255,255,0.8);
-      padding:12px; border-radius:4px;
-      z-index:20;
+    /* Hide scrollbar on WebKit */
+    #model-buttons::-webkit-scrollbar { display: none; }
+
+    /* Individual buttons in carousel */
+    #model-buttons button {
+      flex: 0 0 auto;
+      padding: 10px 20px;
+      font-size: 16px;
+      border: none; border-radius: 6px;
+      background: rgba(255,255,255,0.9);
+      cursor: pointer;
+      white-space: nowrap;
     }
-    canvas { position:absolute; top:0; left:0; }
+
+    /* Order button below carousel */
+    #order-button-container {
+      position: absolute;
+      bottom: 70px;
+      left: 50%; transform: translateX(-50%);
+      display: none;
+      z-index: 11;
+    }
+    #order-button {
+      padding: 14px 40px;
+      font-size: 16px;
+      border: none; border-radius: 6px;
+      background: #007bff; color: white;
+      cursor: pointer;
+      white-space: nowrap;
+    }
   </style>
 
-  <!-- ========== IMPORTMAP ДЛЯ three.js ========== -->
+  <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
   <script type="importmap">
   {
     "imports": {
       "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "GLTFLoader": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js",
-      "ARButton": "https://unpkg.com/three@0.160.0/examples/jsm/webxr/ARButton.js"
+      "three/examples/jsm/webxr/ARButton.js": "https://unpkg.com/three@0.160.0/examples/jsm/webxr/ARButton.js",
+      "three/examples/jsm/loaders/GLTFLoader.js": "https://unpkg.com/three@0.160.0/examples/jsm/loaders/GLTFLoader.js"
     }
   }
   </script>
-  <script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
 </head>
-
 <body>
-  <!-- ======= СТАРТОВИЙ ОВЕРЛЕЙ ======= -->
-  <div id="screen-overlay">
-    <button id="start-ar"></button>
-    <div id="order-button-container"></div>
-    <div id="model-switch-buttons"></div>
+
+  <div id="overlay">
+    <button id="close-ar">&#10005;</button>
+    <div id="model-buttons"></div>
+    <div id="order-button-container">
+      <button id="order-button">To order</button>
+    </div>
   </div>
-
-  <!-- ======= Анімація “пошук поверхні” ======= -->
-  <img id="search-frame">
-
-  <!-- ======= AR canvas ======= -->
-  <canvas id="ar-canvas"></canvas>
 
   <script type="module">
   import * as THREE from 'three';
-  import { GLTFLoader } from 'GLTFLoader';
-  import { ARButton } from 'ARButton';
+  import { ARButton } from 'three/examples/jsm/webxr/ARButton.js';
+  import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-  // 1) РОЗБІР URL-ПАРАМЕТРІВ
-  const params          = new URLSearchParams(window.location.search);
-  const lang            = params.get('lang')          || 'ua';
-  const byUrl           = params.get('byUrl')         || null;
-  const commodityName   = params.get('commodityName') || null;
-  const scaleEnabled    = params.has('scale');
-  const buttonsArCount  = parseInt(params.get('buttonsAr')) || 0;
-  const modelLabel      = commodityName || null;
+  let camera, scene, renderer, controller, reticle;
+  let hitTestSource = null, hitTestSourceRequested = false;
+  let modelList = [], modelObjects = [], placedModel = null;
+  let isUserInteracting = false, lastTouchX = 0, lastTouchY = 0;
+  let isRotatingGesture = false, previousRotationAngle = 0;
+  const loader = new GLTFLoader();
+  const urlParams = new URLSearchParams(window.location.search);
+  const configUrl = urlParams.get('config');
+  const byUrl = urlParams.get('byUrl');
 
-  // 2) UI-конфіг для фону та послідовності кадрів
-  const uiConfig = {
-    backgroundUrl: params.get('background') ||
-      'https://raw.githubusercontent.com/Katr5na/WebGL-Surface-Tracking-AR/master/ui/background/peachy.jpg',
-    helpSequenceUrl:
-      'https://raw.githubusercontent.com/Katr5na/WebGL-Surface-Tracking-AR/master/ui/help_to_install_sequence'
-  };
-
-  let translations = {};
-  let currentModelIndex = 0;
-
-  // 3) ЗАВАНТАЖЕННЯ ЛОКАЛІЗАЦІЇ
-  async function loadLocalization() {
-    try {
-      const gs = await fetch('GoogleSheetsLocalization.json').then(r=>r.json());
-      const url = new URL(gs.codeGsUrl);
-      url.searchParams.set('sheetKey', gs.sheetKey);
-      url.searchParams.set('sheetName', gs.sheetName);
-      url.searchParams.set('lang', lang);
-      translations = await fetch(url).then(r=>r.json());
-    } catch(e) {
-      console.warn('Не вдалося завантажити локалізацію, будуть дефолти', e);
-      translations = {};
-    }
+  if (!configUrl) {
+    alert("Missing ?config= parameter");
+    throw new Error("Missing config");
   }
 
-  // 4) ІНІЦІАЛІЗАЦІЯ UI
-  async function initUI() {
-    await loadLocalization();
-
-    // фон
-    document.body.style.backgroundImage = `url(${uiConfig.backgroundUrl})`;
-    document.body.style.backgroundSize  = 'cover';
-
-    // кнопка “Запустити AR”
-    const startBtn = document.getElementById('start-ar');
-    startBtn.textContent = translations.startAr || 'Запустити AR';
-    startBtn.addEventListener('click', ()=> {
-      document.getElementById('screen-overlay').style.display = 'none';
-      startARSession();
-      startSearchAnimation();
-    });
-
-    // кнопка “Замовити”
-    if (byUrl) {
-      const c = document.getElementById('order-button-container');
-      const btn = document.createElement('a');
-      btn.href = byUrl;
-      btn.textContent = translations.byButton || 'Замовити';
-      btn.classList.add('order-button');
-      c.append(btn);
-    }
-
-    // кнопки перемикання моделей
-    const sw = document.getElementById('model-switch-buttons');
-    for (let i=0; i<buttonsArCount; i++) {
-      const btn = document.createElement('button');
-      btn.textContent = 
-        translations.buttonTexts?.[i] || `Модель ${i+1}`;
-      btn.addEventListener('click', ()=> currentModelIndex = i);
-      sw.append(btn);
-    }
+  function getTouchAngle(touches) {
+    const dx = touches[1].clientX - touches[0].clientX;
+    const dy = touches[1].clientY - touches[0].clientY;
+    return Math.atan2(dy, dx);
   }
 
-  // 5) Анімація “пошук” (75 кадрів за ~2 сек)
-  let searchAnimationInterval;
-  function startSearchAnimation() {
-    const img = document.getElementById('search-frame');
-    img.style.display = 'block';
-    let frame = 0, total = 75, interval = 2000/75;
-    searchAnimationInterval = setInterval(()=>{
-      const n = String(frame).padStart(2,'0');
-      img.src = `${uiConfig.helpSequenceUrl}/frame_${n}_delay-0.08s.png`;
-      frame = (frame+1)%total;
-    }, interval);
-  }
-  function stopSearchAnimation() {
-    clearInterval(searchAnimationInterval);
-    document.getElementById('search-frame').style.display = 'none';
-  }
+  fetch(configUrl)
+    .then(res => res.json())
+    .then(cfg => {
+      modelList = cfg.models;
+      return Promise.all(modelList.map(entry => new Promise(resolve => {
+        loader.load(entry.url, gltf => {
+          const model = gltf.scene;
+          model.scale.set(1, 1, 1);
+          modelObjects.push(model);
+          resolve();
+        }, undefined, err => {
+          console.error(`Error loading model ${entry.label}:`, err);
+          modelObjects.push(null);
+          resolve();
+        });
+      })));
+    })
+    .then(() => { init(); animate(); })
+    .catch(err => { console.error(err); alert("Failed to load config"); });
 
-  // 6) AR-ЛОГІКА
-  let scene, camera, renderer, reticle, modelObjects = [];
-
-  async function startARSession() {
-    // 🔹 Завантажуємо моделі з JSON-конфігу (lion.json чи reni.json)
-    const configUrl = params.get('config');
-    const list = await fetch(configUrl).then(r=>r.json());
-    const loader = new GLTFLoader();
-    modelObjects = await Promise.all(
-      list.map(e =>
-        loader.loadAsync(e.url)
-          .then(g=>g.scene)
-          .catch(_=>null)
-      )
-    );
-
-    // 🔹 Створюємо сцену, камеру, світло
-    scene    = new THREE.Scene();
-    camera   = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 20);
+  function init() {
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
     scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
 
-    // 🔹 Рендерер із XR
-    renderer = new THREE.WebGLRenderer({
-      antialias: true, alpha: true, canvas: document.getElementById('ar-canvas')
-    });
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
-    document.body.append(
-      ARButton.createButton(renderer, {
-        requiredFeatures: ['hit-test','dom-overlay'],
-        domOverlay: { root: document.body }
-      })
-    );
+    document.body.appendChild(renderer.domElement);
 
-    // 🔹 Ретікл + жовтий колір
-    reticle = new THREE.Mesh(
-      new THREE.RingGeometry(0.15,0.2,32).rotateX(-Math.PI/2),
-      new THREE.MeshBasicMaterial({ color: 0xFFD700 })
-    );
-    reticle.matrixAutoUpdate = false;
-    reticle.visible = false;
-    scene.add(reticle);
-
-    // 🔹 Хіт-тести та “select”
-    let hitSource, localRef;
-    renderer.xr.addEventListener('sessionstart', async ()=>{
-      const session = renderer.xr.getSession();
-      const viewer  = await session.requestReferenceSpace('viewer');
-      hitSource     = await session.requestHitTestSource({ space: viewer });
-      localRef      = await session.requestReferenceSpace('local');
-      session.addEventListener('select', onSelect);
-    });
-
-    // 🔹 Цикл рендера
-    renderer.setAnimationLoop((_, frame)=>{
-      if (frame && hitSource) {
-        const hits = frame.getHitTestResults(hitSource);
-        if (hits.length) {
-          const pose = hits[0].getPose(localRef);
-          reticle.visible = true;
-          reticle.matrix.fromArray(pose.transform.matrix);
-          stopSearchAnimation();
-        }
+    // Touch gestures for move & rotate
+    document.addEventListener('touchstart', event => {
+      if (!placedModel) return;
+      if (event.touches.length === 1) {
+        isUserInteracting = true;
+        lastTouchX = event.touches[0].clientX;
+        lastTouchY = event.touches[0].clientY;
+      } else if (event.touches.length === 2) {
+        isRotatingGesture = true;
+        previousRotationAngle = getTouchAngle(event.touches);
       }
-      renderer.render(scene, camera);
+    });
+    document.addEventListener('touchmove', event => {
+      if (!placedModel) return;
+      if (isRotatingGesture && event.touches.length === 2) {
+        const angle = getTouchAngle(event.touches);
+        const delta = angle - previousRotationAngle;
+        placedModel.rotation.y -= delta;
+        previousRotationAngle = angle;
+      } else if (isUserInteracting && event.touches.length === 1) {
+        const touch = event.touches[0];
+        const deltaX = (touch.clientX - lastTouchX) * 0.005;
+        const deltaY = (touch.clientY - lastTouchY) * 0.005;
+        placedModel.position.x += deltaX;
+        placedModel.position.z += deltaY;
+        lastTouchX = touch.clientX;
+        lastTouchY = touch.clientY;
+      }
+    });
+    document.addEventListener('touchend', event => {
+      if (event.touches.length < 2) isRotatingGesture = false;
+      if (event.touches.length === 0) isUserInteracting = false;
     });
 
-    window.addEventListener('resize', ()=>{
-      camera.aspect = window.innerWidth/window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+    // ARButton with DOM Overlay
+    const overlayRoot = document.getElementById('overlay');
+    const sessionInit = {
+      requiredFeatures: ['hit-test','dom-overlay'],
+      optionalFeatures: ['dom-overlay'],
+      domOverlay: { root: overlayRoot }
+    };
+    document.body.appendChild(ARButton.createButton(renderer, sessionInit));
+
+    // Close AR
+    document.getElementById('close-ar').addEventListener('click', () => {
+      const session = renderer.xr.getSession(); if (session) session.end();
     });
 
-    // 🔹 Жести (переміщення/поворот/масштаб) — вставте тут ваш код, обгорнувши блок масштабу:
-    // if (scaleEnabled && touches.length === 2) { … }
+    // Reticle
+    const ringGeo = new THREE.RingGeometry(0.05, 0.06, 32).rotateX(-Math.PI/2);
+    reticle = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffaa2a }));
+    reticle.matrixAutoUpdate = false; reticle.visible = false; scene.add(reticle);
+
+    controller = renderer.xr.getController(0);
+    controller.addEventListener('select', onSelect);
+    scene.add(controller);
+
+    window.addEventListener('resize', onWindowResize, false);
   }
 
-  // 7) Обробник “select” (розміщення моделі або помилка)
   function onSelect() {
-    if (!commodityName) {
-      const err = document.createElement('div');
-      err.classList.add('error-text');
-      err.textContent = translations.error || 'Помилка 005';
-      document.body.append(err);
-      return;
+    if (!reticle.visible || placedModel) return;
+    const model = modelObjects[0]; if (!model) { alert("Model load error"); return; }
+    placedModel = model.clone();
+    placedModel.position.setFromMatrixPosition(reticle.matrix);
+    placedModel.quaternion.setFromRotationMatrix(reticle.matrix);
+    placedModel.scale.set(1,1,1); scene.add(placedModel);
+    reticle.visible = false; hitTestSourceRequested = false; hitTestSource = null;
+    buildModelButtons();
+    if (byUrl) {
+      const oc = document.getElementById('order-button-container'); oc.style.display = 'block';
+      document.getElementById('order-button').onclick = () => { window.location.href = byUrl; };
     }
-    const mdl = modelObjects[currentModelIndex]?.clone();
-    if (mdl) {
-      mdl.applyMatrix4(reticle.matrix);
-      scene.add(mdl);
-    }
-    reticle.visible = false;
-    stopSearchAnimation();
   }
 
-  // === Запускаємо UI на початку ===
-  initUI();
+  function buildModelButtons() {
+    const container = document.getElementById('model-buttons'); container.innerHTML = '';
+    modelList.forEach((entry, idx) => {
+      const m = modelObjects[idx]; if (!m) return;
+      const btn = document.createElement('button'); btn.textContent = entry.label;
+      btn.addEventListener('click', () => replaceModel(m)); container.appendChild(btn);
+    });
+    container.style.display = 'flex';
+  }
+
+  function replaceModel(newModel) {
+    if (!placedModel) return;
+    const { position, rotation, scale } = placedModel;
+    scene.remove(placedModel);
+    placedModel = newModel.clone();
+    placedModel.position.copy(position); placedModel.rotation.copy(rotation); placedModel.scale.copy(scale);
+    scene.add(placedModel);
+  }
+
+  function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  function animate() { renderer.setAnimationLoop(render); }
+
+  function render(time, frame) {
+    if (frame && !placedModel) {
+      const session = renderer.xr.getSession(); const refSpace = renderer.xr.getReferenceSpace();
+      if (!hitTestSourceRequested) {
+        session.requestReferenceSpace('viewer')
+          .then(rs => session.requestHitTestSource({ space: rs }))
+          .then(src => { hitTestSource = src; });
+        session.addEventListener('end', () => { hitTestSourceRequested = false; hitTestSource = null; });
+        hitTestSourceRequested = true;
+      }
+      if (hitTestSource) {
+        const hits = frame.getHitTestResults(hitTestSource);
+        if (hits.length > 0) {
+          const pose = hits[0].getPose(refSpace);
+          reticle.visible = true; reticle.matrix.fromArray(pose.transform.matrix);
+        } else reticle.visible = false;
+      }
+    }
+    renderer.render(scene, camera);
+  }
   </script>
+
 </body>
 </html>
