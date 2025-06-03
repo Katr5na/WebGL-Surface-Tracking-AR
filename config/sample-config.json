@@ -1,0 +1,12 @@
+{
+  "models": [
+    {
+      "label": "Chair",
+      "url": "./models/chair.glb"
+    },
+    {
+      "label": "Lamp",
+      "url": "./models/lamp.glb"
+    }
+  ]
+}
