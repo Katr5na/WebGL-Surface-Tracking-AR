@@ -1,7 +1,7 @@
 // modules/ConfigBuilder.js
-import { parseUrlParams } from './UrlReader.js';
-import { showErrorScreen, setInitialModelIndex } from './UIController.js';
-import { loadGLTF } from './ARController.js';
+import { parseUrlParams } from './urlReader.js';
+import { showErrorScreen, setInitialModelIndex } from './uiController.js';
+import { loadGLTF } from './arController.js';
 
 /**
  * Завантажує assetLinks.json, далі modelsJson (з models/*.json),
