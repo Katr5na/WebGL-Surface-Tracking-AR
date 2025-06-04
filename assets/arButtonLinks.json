@@ -1,5 +1,8 @@
 {
-  "sheetKey": "1uMR9fauSSLKP5p1ZOa8_KxJ34BIZUVBu_KMtvU3Ihhg",
-  "codeGsUrl": "https://script.google.com/macros/s/.../exec",
-  "sheetName": "Sheet1"
+  "commodity1": {
+    "arButtonsUrl": "models/commodity1.json"
+  },
+  "commodity2": {
+    "arButtonsUrl": "models/commodity2.json"
+  }
 }
