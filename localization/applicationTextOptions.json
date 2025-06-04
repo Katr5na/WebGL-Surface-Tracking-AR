@@ -1,5 +1,9 @@
 {
-  "sheetKey": "1uMR9fauSSLKP5p1ZOa8_KxJ34BIZUVBu_KMtvU3Ihhg",
-  "codeGsUrl": "https://script.google.com/macros/s/.../exec",
-  "sheetName": "Sheet1"
+  "startAr": "Запустити AR",
+  "instruction": "Вкажіть, де розмістити модель",
+  "byButton": "Замовити",
+  "error": "Помилка",
+  "textArButtons1": "Варіант 1",
+  "textArButtons2": "Варіант 2",
+  "textArButtons3": "Варіант 3"
 }
