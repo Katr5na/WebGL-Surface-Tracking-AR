@@ -1,7 +1,7 @@
 // modules/UIController.js
 import { HideLoadingPage } from '../uiView.js';
 import { ConfigBuilder } from './configurationBuilder.js';
-import { LocalizationService } from './localization/localizationService.js';
+import { LocalizationService } from '../localization/localizationService.js';
 import { ARController } from './arController.js';
 
 /**
