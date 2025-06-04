@@ -1,0 +1,12 @@
+{
+  "models": [
+    {
+      "label": "Example1",
+      "url": "https://example.com/path/to/model1.glb"
+    },
+    {
+      "label": "Example1-Variant2",
+      "url": "https://example.com/path/to/model1_variant2.glb"
+    }
+  ]
+}
