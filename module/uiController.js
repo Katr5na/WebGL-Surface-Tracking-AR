@@ -1,8 +1,8 @@
 // modules/UIController.js
-import { HideLoadingPage } from '../UiViewer.js';
-import { ConfigBuilder } from './ConfigBuilder.js';
-import { LocalizationService } from './LocalizationService.js';
-import { ARController } from './ARController.js';
+import { HideLoadingPage } from '../uiViewer.js';
+import { ConfigBuilder } from './configurationBuilder.js';
+import { LocalizationService } from './localizationService.js';
+import { ARController } from './arController.js';
 
 /**
  * Відповідає за:
