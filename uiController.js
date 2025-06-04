@@ -1,143 +1,169 @@
-import * as THREE from 'three';
-import { ARButton } from 'three/examples/jsm/webxr/ARButton.js';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+// modules/UIController.js
+import { HideLoadingPage } from '../UiViewer.js';
+import { ConfigBuilder } from './ConfigBuilder.js';
+import { LocalizationService } from './LocalizationService.js';
+import { ARController } from './ARController.js';
 
-let camera, scene, renderer, controller, reticle;
-let hitTestSource = null, hitTestSourceRequested = false;
-let modelList = [], modelObjects = [], placedModel = null;
-const loader = new GLTFLoader();
-const urlParams = new URLSearchParams(window.location.search);
-const configUrl = urlParams.get('config');
-const byUrl = urlParams.get('byUrl');
+/**
+ * Відповідає за:
+ * 1) Показ error-screen із відповідним повідомленням.
+ * 2) Ініціалізацію ConfigBuilder і LocalizationService.
+ * 3) Побудову initial home-screen (з кастомним SVG-trigger).
+ * 4) Запуск ARController.
+ */
 
-if (!configUrl) {
-  alert("Missing ?config= parameter");
-  throw new Error("Missing config");
+function createSvgStartButton() {
+  // Приклад SVG-кнопки (її можна замінити на свою іконку)
+  const btn = document.createElement('button');
+  btn.id = 'start-ar-button';
+  btn.setAttribute('aria-label', 'Запустити AR');
+  btn.style.border = 'none';
+  btn.style.background = 'transparent';
+  btn.style.cursor = 'pointer';
+  btn.innerHTML = `
+    <svg width="120" height="120" viewBox="0 0 120 120" aria-hidden="true">
+      <circle cx="60" cy="60" r="58" fill="#ffffff" stroke="#333" stroke-width="2" />
+      <polygon points="50,40 80,60 50,80" fill="#333" />
+    </svg>
+    <span style="display:block; font-size:16px; margin-top:8px; color:#333;">
+      Запустити AR
+    </span>
+  `;
+  return btn;
 }
 
-fetch(configUrl)
-  .then(res => res.json())
-  .then(cfg => {
-    modelList = cfg.models;
-    return Promise.all(modelList.map(entry => new Promise(resolve => {
-      loader.load(entry.url, gltf => {
-        modelObjects.push(gltf.scene);
-        resolve();
-      }, undefined, err => {
-        console.error(`Error loading ${entry.label}:`, err);
-        modelObjects.push(null);
-        resolve();
-      });
-    })));
-  })
-  .then(() => { init(); animate(); })
-  .catch(err => { console.error(err); alert("Failed to load config"); });
-
-function init() {
-  scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
-
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
-
-  const overlay = document.getElementById('overlay');
-  const sessionInit = {
-    requiredFeatures: ['hit-test', 'dom-overlay'],
-    domOverlay: { root: overlay }
-  };
-  document.body.appendChild(ARButton.createButton(renderer, sessionInit));
-
-  document.getElementById('close-ar').addEventListener('click', () => {
-    const session = renderer.xr.getSession(); if (session) session.end();
-  });
-
-  const ringGeo = new THREE.RingGeometry(0.05, 0.06, 32).rotateX(-Math.PI / 2);
-  reticle = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffaa2a }));
-  reticle.matrixAutoUpdate = false;
-  reticle.visible = false;
-  scene.add(reticle);
-
-  controller = renderer.xr.getController(0);
-  controller.addEventListener('select', onSelect);
-  scene.add(controller);
-
-  window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+export function showErrorScreen(message) {
+  document.body.innerHTML = '';
+  const div = document.createElement('div');
+  div.style.cssText = `
+    display:flex; flex-direction:column;
+    justify-content:center; align-items:center;
+    width:100vw; height:100vh; background:#fff;
+  `;
+  const txt = document.createElement('div');
+  txt.textContent = message || 'Помилка 005';
+  txt.style.fontSize = '24px';
+  txt.style.marginBottom = '20px';
+  div.appendChild(txt);
+  const btn = document.createElement('button');
+  btn.textContent = 'Вихід';
+  btn.setAttribute('aria-label', 'Вихід');
+  btn.style.padding = '10px 20px';
+  btn.style.fontSize = '16px';
+  btn.onclick = () => window.close();
+  div.appendChild(btn);
+  document.body.appendChild(div);
 }
 
-function onSelect() {
-  if (!reticle.visible || placedModel) return;
-  const model = modelObjects[0];
-  if (!model) return alert("Model failed to load.");
-  placedModel = model.clone();
-  placedModel.position.setFromMatrixPosition(reticle.matrix);
-  placedModel.quaternion.setFromRotationMatrix(reticle.matrix);
-  scene.add(placedModel);
-  buildModelButtons();
+/**  
+ * Створює і показує home-screen (фон + SVG-кнопка).  
+ * Після кліку — запускає ARController.  
+ */
+async function showHomeScreen(params, modelList, loadedModels, loadModelAtIndex, localizationData) {
+  HideLoadingPage();
 
-  if (byUrl) {
-    const oc = document.getElementById('order-button-container');
-    oc.style.display = 'block';
-    document.getElementById('order-button').onclick = () => window.location.href = byUrl;
+  // Додати контейнер для home-screen
+  const homeDiv = document.createElement('div');
+  homeDiv.id = 'home-screen';
+  homeDiv.style.cssText = 'position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:0;';
+
+  // Фонове зображення (встановимо через CSS з assets.json)
+  try {
+    const resp = await fetch('assets.json');
+    const aJson = await resp.json();
+    homeDiv.style.backgroundImage = `url(${aJson.background}/${aJson.backgroundName})`;
+    homeDiv.style.backgroundSize = 'cover';
+    homeDiv.style.backgroundPosition = 'center';
+  } catch {
+    homeDiv.style.backgroundColor = '#fafafa';
   }
-}
 
-function buildModelButtons() {
-  const container = document.getElementById('model-buttons');
-  container.innerHTML = '';
-  modelList.forEach((entry, idx) => {
-    const model = modelObjects[idx];
-    if (!model) return;
-    const btn = document.createElement('button');
-    btn.textContent = entry.label;
-    btn.addEventListener('click', () => switchModel(model));
-    container.appendChild(btn);
+  // SVG-кнопка «Запустити AR»
+  const svgBtn = createSvgStartButton();
+  svgBtn.style.cssText += `
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%, -50%);
+    background:transparent;
+    border:none;
+  `;
+  svgBtn.addEventListener('click', () => {
+    // При кліку: видалити home-screen, створити #ar-container і #overlay, передати усе ARController
+    homeDiv.remove();
+    startAR(params, modelList, loadedModels, loadModelAtIndex, localizationData);
   });
-  container.style.display = 'flex';
+
+  homeDiv.appendChild(svgBtn);
+  document.body.appendChild(homeDiv);
 }
 
-function switchModel(newModel) {
-  if (!placedModel) return;
-  scene.remove(placedModel);
-  placedModel = newModel.clone();
-  scene.add(placedModel);
+/**  
+ * Запускає ARController, передаючи всі налаштовані дані.  
+ */
+function startAR(params, modelList, loadedModels, loadModelAtIndex, localizationData) {
+  // Додаємо елементи DOM: #ar-container і #overlay
+  const arContainer = document.createElement('div');
+  arContainer.id = 'ar-container';
+  document.body.appendChild(arContainer);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'overlay';
+  overlay.style.display = 'none';
+  overlay.innerHTML = `
+    <button id="close-ar" aria-label="Закрити AR">&times;</button>
+    <div id="model-buttons" role="group" aria-label="Кнопки перемикання моделей"></div>
+    <div id="order-button-container" style="display:none;">
+      <button id="order-button" aria-label="Замовити"></button>
+    </div>
+    <div id="scan-animation" style="display:none;">
+      <img id="scan-frame" src="" alt="Сканування поверхні" />
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // Створюємо екземпляр ARController і передаємо всі потрібні дані
+  const arCtrl = new ARController({
+    params,
+    modelList,
+    loadedModels,
+    loadModelAtIndex,
+    localizationData
+  });
+  arCtrl.init();  // Стартує AR (створить сцену, запустить render-loop, hit-test тощо)
 }
 
-function animate() {
-  renderer.setAnimationLoop(render);
-}
+(async function initApp() {
+  // 1) Конфігурація (ConfigBuilder)
+  let configObj;
+  try {
+    const builder = new ConfigBuilder();
+    configObj = await builder.init();
+  } catch {
+    return; // Якщо помилка у конфігурації, showErrorScreen вже викликаний
+  }
 
-function render(_, frame) {
-  if (frame && !placedModel) {
-    const session = renderer.xr.getSession();
-    const refSpace = renderer.xr.getReferenceSpace();
-    if (!hitTestSourceRequested) {
-      session.requestReferenceSpace('viewer')
-        .then(rs => session.requestHitTestSource({ space: rs }))
-        .then(src => { hitTestSource = src; });
-      session.addEventListener('end', () => {
-        hitTestSourceRequested = false;
-        hitTestSource = null;
-      });
-      hitTestSourceRequested = true;
-    }
-    if (hitTestSource) {
-      const hits = frame.getHitTestResults(hitTestSource);
-      if (hits.length > 0) {
-        const pose = hits[0].getPose(refSpace);
-        reticle.visible = true;
-        reticle.matrix.fromArray(pose.transform.matrix);
-      } else {
-        reticle.visible = false;
+  // 2) Локалізація (LocalizationService)
+  const { params, modelList, loadedModels, loadModelAtIndex } = configObj;
+  const lang = params.lang;
+  const locService = new LocalizationService();
+  const localizationResult = await locService.init(modelList.length, lang);
+
+  // Якщо нічого не повернулося — беремо дефолти з applicationTextOptions.json
+  let localizationData = localizationResult;
+  if (!localizationData) {
+    try {
+      const resp = await fetch('applicationTextOptions.json');
+      localizationData = await resp.json();
+      // Для кнопок моделей, яких більше 1, просто пронумеруємо
+      for (let i = 0; i < modelList.length; i++) {
+        localizationData[`textArButtons${i+1}`] = `${i+1}`;
       }
+    } catch {
+      localizationData = {};
     }
   }
 
-  renderer.render(scene, camera);
-}
+  // 3) Показати home-screen із кастомним SVG і aria-атрибутами
+  showHomeScreen(params, modelList, loadedModels, loadModelAtIndex, localizationData);
+})();
