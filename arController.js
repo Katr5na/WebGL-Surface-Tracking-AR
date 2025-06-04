@@ -1,143 +1,346 @@
+// modules/ARController.js
 import * as THREE from 'three';
 import { ARButton } from 'three/examples/jsm/webxr/ARButton.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-let camera, scene, renderer, controller, reticle;
-let hitTestSource = null, hitTestSourceRequested = false;
-let modelList = [], modelObjects = [], placedModel = null;
-const loader = new GLTFLoader();
-const urlParams = new URLSearchParams(window.location.search);
-const configUrl = urlParams.get('config');
-const byUrl = urlParams.get('byUrl');
+/**
+ * ARController відповідає за:
+ * 1) Створення Three.js-сцени та XR-сесії із DOM-Overlay.
+ * 2) Scan-анімацію (75 кадрів із assets.json).
+ * 3) Hit-test, ретикл, розміщення моделі.
+ * 4) Lazy-load інших моделей під час перемикання кнопок.
+ * 5) Жести (drag, rotate, pinch) з урахуванням scaleEnabled.
+ */
+export class ARController {
+  constructor({ params, modelList, loadedModels, loadModelAtIndex, localizationData }) {
+    this.params = params;
+    this.modelList = modelList;
+    this.loadedModels = loadedModels;
+    this.loadModelAtIndex = loadModelAtIndex;
+    this.localizationData = localizationData;
 
-if (!configUrl) {
-  alert("Missing ?config= parameter");
-  throw new Error("Missing config");
-}
+    // Будемо зберігати посилання на DOM-елементи:
+    this.renderer = null;
+    this.scene = null;
+    this.camera = null;
+    this.reticle = null;
+    this.controller = null;
+    this.hitTestSource = null;
+    this.hitTestSourceRequested = false;
+    this.scanInterval = null;
+    this.currentFrameIndex = 0;
 
-fetch(configUrl)
-  .then(res => res.json())
-  .then(cfg => {
-    modelList = cfg.models;
-    return Promise.all(modelList.map(entry => new Promise(resolve => {
-      loader.load(entry.url, gltf => {
-        modelObjects.push(gltf.scene);
-        resolve();
-      }, undefined, err => {
-        console.error(`Error loading ${entry.label}:`, err);
-        modelObjects.push(null);
-        resolve();
-      });
-    })));
-  })
-  .then(() => { init(); animate(); })
-  .catch(err => { console.error(err); alert("Failed to load config"); });
+    // Параметри жестів
+    this.isUserInteracting = false;
+    this.isRotatingGesture = false;
+    this.isScalingGesture = false;
+    this.lastTouchX = 0;
+    this.lastTouchY = 0;
+    this.previousRotationAngle = 0;
+    this.initialPinchDistance = 0;
 
-function init() {
-  scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-  scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
+    // Зчитані параметри
+    this.scaleEnabled = params.scaleEnabled;
+    this.byUrl = params.byUrl;
+    this.lang = params.lang;
 
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.xr.enabled = true;
-  document.body.appendChild(renderer.domElement);
+    // Шляхи та префікси для scan-анімації (з assets.json)
+    this.scanFramesBaseUrl = '';
+    this.scanFramePrefix = 'frame_';
+    this.scanFrameSuffix = '_delay-0.08s.png';
+    this.frameCount = 75;
+    this.scanDuration = 3000; // ms
 
-  const overlay = document.getElementById('overlay');
-  const sessionInit = {
-    requiredFeatures: ['hit-test', 'dom-overlay'],
-    domOverlay: { root: overlay }
-  };
-  document.body.appendChild(ARButton.createButton(renderer, sessionInit));
-
-  document.getElementById('close-ar').addEventListener('click', () => {
-    const session = renderer.xr.getSession(); if (session) session.end();
-  });
-
-  const ringGeo = new THREE.RingGeometry(0.05, 0.06, 32).rotateX(-Math.PI / 2);
-  reticle = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffaa2a }));
-  reticle.matrixAutoUpdate = false;
-  reticle.visible = false;
-  scene.add(reticle);
-
-  controller = renderer.xr.getController(0);
-  controller.addEventListener('select', onSelect);
-  scene.add(controller);
-
-  window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-}
-
-function onSelect() {
-  if (!reticle.visible || placedModel) return;
-  const model = modelObjects[0];
-  if (!model) return alert("Model failed to load.");
-  placedModel = model.clone();
-  placedModel.position.setFromMatrixPosition(reticle.matrix);
-  placedModel.quaternion.setFromRotationMatrix(reticle.matrix);
-  scene.add(placedModel);
-  buildModelButtons();
-
-  if (byUrl) {
-    const oc = document.getElementById('order-button-container');
-    oc.style.display = 'block';
-    document.getElementById('order-button').onclick = () => window.location.href = byUrl;
+    // Встановимо GLTFLoader
+    this.loader = new GLTFLoader();
   }
-}
 
-function buildModelButtons() {
-  const container = document.getElementById('model-buttons');
-  container.innerHTML = '';
-  modelList.forEach((entry, idx) => {
-    const model = modelObjects[idx];
-    if (!model) return;
-    const btn = document.createElement('button');
-    btn.textContent = entry.label;
-    btn.addEventListener('click', () => switchModel(model));
-    container.appendChild(btn);
-  });
-  container.style.display = 'flex';
-}
+  async init() {
+    // 1) Підготувати canvas/renderer, add ARButton із DOM-Overlay
+    this.setupThreeXR();
 
-function switchModel(newModel) {
-  if (!placedModel) return;
-  scene.remove(placedModel);
-  placedModel = newModel.clone();
-  scene.add(placedModel);
-}
+    // 2) Показати scan-анімацію
+    await this.loadAssetsForScanAnimation();
+    this.startScanAnimation();
 
-function animate() {
-  renderer.setAnimationLoop(render);
-}
+    // 3) Запустити render-loop
+    this.animate();
+  }
 
-function render(_, frame) {
-  if (frame && !placedModel) {
-    const session = renderer.xr.getSession();
-    const refSpace = renderer.xr.getReferenceSpace();
-    if (!hitTestSourceRequested) {
-      session.requestReferenceSpace('viewer')
-        .then(rs => session.requestHitTestSource({ space: rs }))
-        .then(src => { hitTestSource = src; });
-      session.addEventListener('end', () => {
-        hitTestSourceRequested = false;
-        hitTestSource = null;
-      });
-      hitTestSourceRequested = true;
+  setupThreeXR() {
+    // Сцена + камера
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
+
+    // Рендерер
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    this.renderer.setPixelRatio(window.devicePixelRatio);
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.xr.enabled = true;
+    document.getElementById('ar-container').appendChild(this.renderer.domElement);
+
+    // Події дотику
+    document.addEventListener('touchstart', this.onTouchStart.bind(this));
+    document.addEventListener('touchmove', this.onTouchMove.bind(this));
+    document.addEventListener('touchend', this.onTouchEnd.bind(this));
+
+    // ARButton із DOM-Overlay
+    const overlayRoot = document.getElementById('overlay');
+    const sessionInit = {
+      requiredFeatures: ['hit-test', 'dom-overlay'],
+      optionalFeatures: ['dom-overlay'],
+      domOverlay: { root: overlayRoot }
+    };
+    overlayRoot.style.pointerEvents = 'none';
+    document.body.appendChild(ARButton.createButton(this.renderer, sessionInit));
+
+    // Кнопка «Закрити AR»
+    const closeBtn = document.getElementById('close-ar');
+    closeBtn.addEventListener('click', () => {
+      const session = this.renderer.xr.getSession();
+      if (session) session.end();
+    });
+
+    // Reticle
+    const ringGeom = new THREE.RingGeometry(0.05, 0.06, 32).rotateX(-Math.PI / 2);
+    this.reticle = new THREE.Mesh(
+      ringGeom,
+      new THREE.MeshBasicMaterial({ color: 0xffaa2a })
+    );
+    this.reticle.matrixAutoUpdate = false;
+    this.reticle.visible = false;
+    this.scene.add(this.reticle);
+
+    // Controller (XR select)
+    this.controller = this.renderer.xr.getController(0);
+    this.controller.addEventListener('select', this.onSelect.bind(this));
+    this.scene.add(this.controller);
+
+    window.addEventListener('resize', this.onWindowResize.bind(this));
+  }
+
+  async loadAssetsForScanAnimation() {
+    // Завантажуємо assets.json, щоб отримати базу для scan-анімації
+    try {
+      const resp = await fetch('assets.json');
+      const aJson = await resp.json();
+      this.scanFramesBaseUrl = aJson.helpToInstall;      // URL до папки з кадрами
+      this.scanFramePrefix = aJson.framePrefix || 'frame_';
+      this.scanFrameSuffix = aJson.frameSuffix || '_delay-0.08s.png';
+      this.frameCount = aJson.frameCount || 75;
+      this.scanDuration = this.frameCount * 40; // ~ 40ms на кадр
+    } catch {
+      // Якщо не вдалося, просто не показуємо scan-анімацію (але AR усе одно працюватиме)
+      this.scanFramesBaseUrl = '';
     }
-    if (hitTestSource) {
-      const hits = frame.getHitTestResults(hitTestSource);
-      if (hits.length > 0) {
-        const pose = hits[0].getPose(refSpace);
-        reticle.visible = true;
-        reticle.matrix.fromArray(pose.transform.matrix);
-      } else {
-        reticle.visible = false;
+  }
+
+  startScanAnimation() {
+    const animDiv = document.getElementById('scan-animation');
+    const img = document.getElementById('scan-frame');
+    animDiv.style.cssText = `
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 200px; height: 200px;
+      z-index: 11;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: rgba(0,0,0,0.3);
+      border-radius: 100px;
+    `;
+    img.style.cssText = `
+      width: 100%;
+      height: 100%;
+    `;
+    animDiv.style.display = 'flex';
+
+    const frameDuration = this.scanDuration / this.frameCount; // близько 40 ms
+    this.currentFrameIndex = 0;
+
+    this.scanInterval = setInterval(() => {
+      const idx = String(this.currentFrameIndex).padStart(2, '0');
+      img.src = `${this.scanFramesBaseUrl}${this.scanFramePrefix}${idx}${this.scanFrameSuffix}`;
+      this.currentFrameIndex = (this.currentFrameIndex + 1) % this.frameCount;
+    }, frameDuration);
+  }
+
+  stopScanAnimation() {
+    clearInterval(this.scanInterval);
+    const animDiv = document.getElementById('scan-animation');
+    if (animDiv) animDiv.style.display = 'none';
+  }
+
+  onWindowResize() {
+    if (!this.camera || !this.renderer) return;
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  animate() {
+    this.renderer.setAnimationLoop(this.render.bind(this));
+  }
+
+  render(time, frame) {
+    if (frame && !this.placedModel) {
+      const session = this.renderer.xr.getSession();
+      const refSpace = this.renderer.xr.getReferenceSpace();
+
+      if (!this.hitTestSourceRequested) {
+        session.requestReferenceSpace('viewer')
+          .then(rs => session.requestHitTestSource({ space: rs }))
+          .then(src => { this.hitTestSource = src; });
+        session.addEventListener('end', () => {
+          this.hitTestSourceRequested = false;
+          this.hitTestSource = null;
+        });
+        this.hitTestSourceRequested = true;
+      }
+
+      if (this.hitTestSource) {
+        const hits = frame.getHitTestResults(this.hitTestSource);
+        if (hits.length > 0) {
+          const pose = hits[0].getPose(refSpace);
+          this.reticle.visible = true;
+          this.reticle.matrix.fromArray(pose.transform.matrix);
+          this.stopScanAnimation();
+          // Змінити колір на жовтий, як тільки вперше показався ретикл
+          this.reticle.material.color.setHex(0xffff00);
+        } else {
+          this.reticle.visible = false;
+        }
       }
     }
+    this.renderer.render(this.scene, this.camera);
   }
 
-  renderer.render(scene, camera);
+  onSelect() {
+    if (!this.reticle.visible || this.placedModel) return;
+
+    // Підвантажити (якщо ще не підвантажено) першу модель (index 0)
+    this.placeModelAtIndex(0);
+  }
+
+  async placeModelAtIndex(i) {
+    // Перший раз завантажити (але ми вже робили lazy-load у ConfigBuilder)
+    let model = this.loadedModels[i];
+    if (!model) {
+      model = await this.loadModelAtIndex(i);
+    }
+    if (!model) {
+      alert((this.localizationData.error || 'Помилка') + ' завантаження моделі');
+      return;
+    }
+
+    this.placedModel = model.clone();
+    this.placedModel.position.setFromMatrixPosition(this.reticle.matrix);
+    this.placedModel.quaternion.setFromRotationMatrix(this.reticle.matrix);
+    this.placedModel.scale.set(1, 1, 1);
+    this.scene.add(this.placedModel);
+
+    // Після розміщення Reticle ховаємо і завершимо hit-test
+    this.reticle.visible = false;
+    this.hitTestSourceRequested = false;
+    this.hitTestSource = null;
+
+    // Запобігти дублікатам scan-анімації
+    this.stopScanAnimation();
+
+    // Показати кнопки перемикання моделей і «Замовити» (якщо потрібно)
+    this.buildModelButtonsUI();
+    if (this.byUrl) {
+      const orderCont = document.getElementById('order-button-container');
+      orderCont.style.display = 'block';
+      const orderBtn = document.getElementById('order-button');
+      orderBtn.textContent = this.localizationData.byButton || 'Замовити';
+      orderBtn.onclick = () => window.location.href = this.byUrl;
+    }
+  }
+
+  buildModelButtonsUI() {
+    const container = document.getElementById('model-buttons');
+    container.innerHTML = '';
+
+    this.modelList.forEach((entry, idx) => {
+      // Якщо це перша модель, яка вже стоїть у сцені, все одно створимо кнопку
+      const btn = document.createElement('button');
+      btn.setAttribute('aria-label', `Модель ${idx + 1}`);
+      btn.textContent = this.localizationData[`textArButtons${idx + 1}`] || entry.label;
+      btn.style.cssText = `
+        flex: 0 0 auto;
+        padding: 8px 16px;
+        font-size: 14px;
+        margin-right: 8px;
+        border: none;
+        border-radius: 4px;
+        background: rgba(255,255,255,0.9);
+        cursor: pointer;
+      `;
+      btn.addEventListener('click', () => this.switchModel(idx));
+      container.appendChild(btn);
+    });
+
+    container.style.cssText = `
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      overflow-x: auto;
+      gap: 8px;
+      padding: 8px 4px;
+      background: rgba(0,0,0,0.4);
+      border-radius: 8px;
+      z-index: 11;
+      -webkit-overflow-scrolling: touch;
+    `;
+    container.setAttribute('role', 'group');
+    container.setAttribute('aria-label', 'Кнопки перемикання моделей');
+  }
+
+  async switchModel(idx) {
+    if (!this.placedModel) return;
+
+    // Зберегти старі трансформації
+    const { position, rotation, scale } = this.placedModel;
+
+    // Видалити поточну модель
+    this.scene.remove(this.placedModel);
+    this.placedModel = null;
+
+    // Підвантажити модель за індексом idx, якщо ще не підвантажено
+    let newModel = this.loadedModels[idx];
+    if (!newModel) {
+      newModel = await this.loadModelAtIndex(idx);
+    }
+    if (!newModel) {
+      alert((this.localizationData.error || 'Помилка') + ' завантаження моделі');
+      return;
+    }
+
+    // Додати нову модель із тими ж трансформаціями
+    this.placedModel = newModel.clone();
+    this.placedModel.position.copy(position);
+    this.placedModel.quaternion.copy(rotation);
+    this.placedModel.scale.copy(scale);
+    this.scene.add(this.placedModel);
+  }
+}
+
+/**
+ * Допоміжна функція для завантаження glTF-моделі через Promise.
+ */
+export function loadGLTF(url) {
+  return new Promise((resolve, reject) => {
+    const loader = new GLTFLoader();
+    loader.load(
+      url,
+      (gltf) => resolve(gltf),
+      undefined,
+      (err) => reject(err)
+    );
+  });
 }
