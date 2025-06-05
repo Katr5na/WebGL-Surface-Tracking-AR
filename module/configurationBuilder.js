@@ -29,7 +29,7 @@ export class ConfigBuilder {
 
     // Завантажити assetLinks.json
     try {
-      const resp = await fetch('assetLinks.json');
+      const resp = await fetch('../assets/assetLinks.json');
       if (!resp.ok) throw new Error('Cannot fetch assetLinks.json');
       this.assetLinks = await resp.json();
     } catch (e) {
