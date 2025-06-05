@@ -1,8 +1,8 @@
 {
-  "commodity1": {
+  "urban-kruglyj": {
     "arButtonsUrl": "https://github.com/Katr5na/WebGL-Surface-Tracking-AR/tree/master/assets/models/urban-kruglyj"
   },
-  "commodity2": {
+  "beverli-2": {
     "arButtonsUrl": "https://github.com/Katr5na/WebGL-Surface-Tracking-AR/blob/master/assets/models/beverli-2.json"
   }
 }
