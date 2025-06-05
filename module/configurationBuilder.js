@@ -1,6 +1,6 @@
 // modules/ConfigBuilder.js
 import { parseUrlParams } from './urlReader.js';
-import { showErrorScreen, setInitialModelIndex } from './uiController.js';
+import { showErrorScreen } from './uiController.js';
 import { loadGLTF } from './arController.js';
 
 /**
