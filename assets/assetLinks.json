@@ -1,8 +1,8 @@
 {
   "commodity1": {
-    "arButtonsUrl": "models/commodity1.json"
+    "arButtonsUrl": "./models/urban-kruglyj.json"
   },
   "commodity2": {
-    "arButtonsUrl": "models/commodity2.json"
+    "arButtonsUrl": "./models/wood_variants_buttons.json"
   }
 }
