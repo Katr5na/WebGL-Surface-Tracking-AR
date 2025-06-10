@@ -2,10 +2,32 @@
 
 /**
  * Зчитує й повертає об’єкт із параметрами URL:
- * lang, byUrl, commodityName, scale, arButtons.
+ * lang, clientName, itemName, arButCount, scale, byUrl.
  */
-export function parseUrlParams() {
-  const params = new URLSearchParams(window.location.search);
+let params = new URLSearchParams(document.location.search);
+
+const lang = params.get("lang");
+console.log("lang", lang);
+
+const clientName = params.get("clientName");
+console.log("clientName", clientName);
+
+const itemName = params.get("itemName");
+console.log("itemName", itemName);
+
+const buyUrl = params.get("buyUrl");
+console.log("buyUrl", buyUrl);
+
+const scale = params.get("scale");
+console.log("scale", scale);
+
+const arButCount = params.get("arButCount");
+console.log("arButCount", arButCount);
+
+
+/**
+* export function parseUrlParams() {
+* const params = new URLSearchParams(window.location.search);
 
   // lang
   const langRaw = params.get('lang');
@@ -28,6 +50,8 @@ export function parseUrlParams() {
   // arButtons: 'dynamic' | number >0 | false
   const arButtonsRaw = params.get('arButtons');
   let arButtons;
+ */ 
+/*
   if (arButtonsRaw && arButtonsRaw.trim()) {
     const v = arButtonsRaw.trim().toLowerCase();
     if (['m','model','im','image'].includes(v)) {
@@ -39,6 +63,6 @@ export function parseUrlParams() {
   } else {
     arButtons = false;
   }
-
-  return { lang, byUrl, commodityName, scaleEnabled, arButtons };
+*/
+  return { lang, clientName, itemName, arButCount, scale, byUrl };
 }
