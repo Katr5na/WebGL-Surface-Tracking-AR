@@ -19,12 +19,12 @@ export class ConfigBuilder {
   }
 
   async init() {
-    const { commodityName, arButtons } = this.params;
+    const { itemName, arButtons } = this.params;
 
     // Якщо commodityName відсутній → error
     if (!commodityName) {
-      showErrorScreen('№005: commodityName missing');
-      throw new Error('commodityName missing');
+      showErrorScreen('№005: itemName missing');
+      throw new Error('itemName missing');
     }
 
     // Завантажити assetLinks.json
