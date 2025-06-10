@@ -4,9 +4,9 @@ const urlTemplates = {
   
   urlItem: `https://demo-assets.advin-global.com/${clientName}/${item}.glb', 
 
-  urlArButton: 'https://demo-assets.advin-global.com/${clientName}/${arButton}.psd', 
+  urlArButton: 'https://demo-assets.advin-global.com/${clientName}/${arButton}.png', 
   
-  urlUielements: "https://demo-assets.advin-global.com/${folderName}/${uiElementName}.psd', 
+  urlUielements: "https://demo-assets.advin-global.com/${folderName}/${uiElementName}.png', 
 
 "
 };
