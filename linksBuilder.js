@@ -1,10 +1,13 @@
 // Шаблони URL з “змінними” у вигляді ${…}
 const urlTemplates = {
-  urlItem: `https://demo-assets.advin-global.com/${clientName}/${item}.glb', //потрібно адаптувати під отримання усіх моделей в папці
+  urlGas: `http://appsscript.com/folder${clientName}/${item}/${lang}`, // GAS - google apps script
+  
+  urlItem: `https://demo-assets.advin-global.com/${clientName}/${item}.glb', 
 
-  urlArButton: 'https://demo-assets.advin-global.com/${clientName}/${arButton}.psd', //потрібно адаптувати під отримання усіх моделей в папці
+  urlArButton: 'https://demo-assets.advin-global.com/${clientName}/${arButton}.psd', 
+  
+  urlUielements: "https://demo-assets.advin-global.com/${folderName}/${uiElementName}.psd', 
 
-  urlUielements: "https://demo-assets.advin-global.com/${folderName}/${uiElementName}.psd', //потрібно адаптувати під отримання усіх моделей в папці
 "
 };
 
