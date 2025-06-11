@@ -20,7 +20,7 @@ function getUrlParams() {
   console.log("buyUrl", buyUrl);
   
   const scaleRaw = params.get("scale");
-  const scale = (scaleRaw && scaleRaw.trim()) ? scaleRaw.trim() : null;
+  const scale = scaleRaw !== null;
   console.log("scale", scale);
   
   const arButCountRaw = params.get("arButCount");
