@@ -1,29 +1,34 @@
-// modules/UrlReader.js
-
-/**
- * Зчитує й повертає об’єкт із параметрами URL:
- * lang, clientName, itemName, arButCount, scale, byUrl.
- */
-let params = new URLSearchParams(document.location.search);
-
-const lang = params.get("lang");
-console.log("lang", lang);
-
-const clientName = params.get("clientName");
-console.log("clientName", clientName);
-
-const itemName = params.get("itemName");
-console.log("itemName", itemName);
-
-const buyUrl = params.get("buyUrl");
-console.log("buyUrl", buyUrl);
-
-const scale = params.get("scale");
-console.log("scale", scale);
-
-const arButCount = params.get("arButCount");
-console.log("arButCount", arButCount);
-
+// Зчитує й повертає параметри з URL: 
+// lang, clientName, itemName, arButCount, scale, buyUrl.
+function getUrlParams() {
+  const params = new URLSearchParams(document.location.search);
+  
+  const langRaw = params.get("lang");
+  const lang = (langRaw && langRaw.trim()) ? langRaw.trim().toLowerCase() : 'uk';
+  console.log("lang", lang);
+  
+  const clientNameRaw = params.get("clientName");
+  const clientName = (clientNameRaw && clientNameRaw.trim()) ? clientNameRaw.trim() : null;
+  console.log("clientName", clientName);
+  
+  const itemNameRaw = params.get("itemName");
+  const itemName = (itemNameRaw && itemNameRaw.trim()) ? itemNameRaw.trim() : null;
+  console.log("itemName", itemName);
+  
+  const buyUrlRaw = params.get("buyUrl");
+  const buyUrl = (buyUrlRaw && buyUrlRaw.trim()) ? buyUrlRaw.trim() : null;
+  console.log("buyUrl", buyUrl);
+  
+  const scaleRaw = params.get("scale");
+  const scale = (scaleRaw && scaleRaw.trim()) ? scaleRaw.trim() : null;
+  console.log("scale", scale);
+  
+  const arButCountRaw = params.get("arButCount");
+  const arButCount = (arButCountRaw && arButCountRaw.trim()) ? arButCountRaw.trim() : null;
+  console.log("arButCount", arButCount);
+  
+  return { lang, clientName, itemName, arButCount, scale, buyUrl };
+}
 
 /**
 * export function parseUrlParams() {
@@ -64,5 +69,5 @@ console.log("arButCount", arButCount);
     arButtons = false;
   }
 */
-  return { lang, clientName, itemName, arButCount, scale, byUrl };
-}
+
+
